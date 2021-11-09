@@ -1,0 +1,133 @@
+---
+title: "Texmining with R Chapter 1"
+output: html_notebook
+---
+
+Notebook on working through Text Mining with R, a tidy approach. Chapter 1. Silge and Robinson
+Nov, 2021
+
+This notebook is a very basic introduction to calling a corpora of text, translating it into a dataframe, and then visualizing it.
+ 
+#Calling the Jane Austen  package (Silge 2016)
+
+```{r}
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+original_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]",
+                                                 ignore_case = TRUE)))) %>%
+  ungroup()
+original_books
+```
+Make this data tidy by structuring it in a one-token-per-row format
+
+```{r}
+library(tidytext)
+tidy_books <- original_books %>%
+  unnest_tokens(word, text)
+
+tidy_books
+```
+
+Use Dplyr to find the most common words in all the books
+```{r}
+tidy_books %>%
+  count(word, sort = TRUE)
+```
+
+Those are all stop words! They don't tell us much about the content. Let's remove them with the tidy text dataset stop_words, then try again:
+```{r}
+data("stop_words")
+tidy_books <- tidy_books %>%
+  anti_join(stop_words)
+
+tidy_books %>%
+  count(word, sort = TRUE)
+```
+
+Let's create a visualization of the most commonly used words with ggplot2!
+```{r}
+library(ggplot2)
+tidy_books %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 600) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip()
+```
+
+
+Moving on to Gutenbergr!
+
+First, we use gutenbergr to download several novels by HG Wells (by Project Gutenberg ID) and remove stopwords
+
+```{r}
+
+library(gutenbergr)
+library(tidytext)
+
+hgwells <- gutenberg_download(c(35, 36, 5230, 159))
+
+tidy_hgwells <- hgwells %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+tidy_hgwells %>%
+  count(word, sort = TRUE)
+
+```
+
+Get works by the Bronte Sisters:
+
+
+```{r}
+bronte <- gutenberg_download(c(1260, 768, 969, 9182, 767))
+tidy_bronte <- bronte %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+
+tidy_bronte %>%
+  count(word, sort = TRUE)
+
+```
+
+
+Calculate the frequency for each word in the three corpora above by binding the dataframes:
+
+```{r}
+library(tidyr)
+
+frequency <- bind_rows(mutate(tidy_bronte, author = "Bronte Sisters"),
+                       mutate(tidy_hgwells, author = "H.G. Wells"),
+                       mutate(tidy_books, author = "Jane Austen")) %>%
+  mutate(word = str_extract(word, "[a-z]+")) %>%
+  count(author, word) %>%
+  group_by(author) %>%
+  mutate(proportion = n / sum(n)) %>%
+  select(-n) %>%
+  spread(author, proportion) %>%
+  gather(author, proportion, 'Bronte Sisters':'H.G. Wells')
+```
+Plot it!
+
+```{r}
+library(scales)
+ggplot(frequency, aes(x = proportion, y = `Jane Austen`,
+                      color = abs(`Jane Austen` - proportion ))) +
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.3, height = 0.3) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(limits = c(0, 0.001),
+                       low = "darkslategray4", high = "gray75") +
+  facet_wrap(~author, ncol = 2) +
+  theme(legend.position = "none") +
+  labs(y = "Jane Austen", x = NULL)
+
+```
+
