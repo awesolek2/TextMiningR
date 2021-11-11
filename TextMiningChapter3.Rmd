@@ -1,0 +1,148 @@
+---
+title: "Text Mining with R Chapter 3"
+output: html_notebook
+---
+
+This notebook covers chapter three of Text Mining with R (Silge and Robinson, 2017) The focus of the exercises is analyzing word and document frequency with tf-idf.
+
+idf = inverse document frequency
+tf = term frequency 
+
+tf-idf weights words that are used infrequently and unweights words that are used more frequently
+
+
+What are the most commonly used words in Jane Austen? First we need to calculate the total number of words
+
+```{r}
+library(dplyr)
+library(janeaustenr)
+library(tidytext)
+
+book_words <- austen_books() %>%
+  unnest_tokens(word, text) %>%
+  count(book, word, sort = TRUE) %>%
+  ungroup()
+
+total_words <- book_words %>%
+  group_by(book) %>%
+  summarize(total = sum(n))
+
+book_words <- left_join(book_words, total_words)
+
+book_words
+  
+```
+
+Plot number of times a word appears by the total number of words (word frequency)
+
+```{r}
+library(ggplot2)
+
+ggplot(book_words, aes(n/total, fill = book)) +
+  geom_histogram(show.legend = FALSE) +
+  xlim(NA, 0.0009) +
+  facet_wrap(~book, ncol = 2, scales = "free_y")
+
+
+```
+
+Zipf's Law = the frequency that a word appears is inversly proportionate to its rank. Let's take a look by calculating the rank then plotting it with ggplot2!
+
+```{r}
+freq_by_rank <- book_words %>%
+  group_by(book) %>%
+  mutate(rank = row_number(),
+`term frequency` = n/total)
+
+freq_by_rank
+
+freq_by_rank %>%
+  ggplot(aes(rank, `term frequency`, color = book)) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) +
+  scale_x_log10() +
+  scale_y_log10()
+
+
+```
+
+```{r}
+book_words <- book_words %>%
+  bind_tf_idf(word, book, n)
+book_words
+```
+^ notice all of the zeros, this means that the words are extremely common across all books (thus they are unweighted)
+
+Lets look at terms with a high tf-idf:
+
+```{r}
+book_words %>%
+  select(-total) %>%
+  arrange(desc(tf_idf))
+
+```
+Visualising these high tf-idf words:
+
+```{r}
+book_words %>%
+  arrange(desc(tf_idf))%>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>%
+  group_by(book) %>%
+  top_n(15) %>%
+  ungroup %>%
+  ggplot(aes(word, tf_idf, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+
+Lets move on to some physics texts that can be found in project gutenberg, with teh gutenbergr package
+
+```{r}
+library(gutenbergr)
+physics <- gutenberg_download(c(37729, 14725, 13476, 5001),
+                              meta_fields = "author")
+#this snippet snags works by galileo, huygens, tesla, and einstein. Getting an Error for Einstein, even though the URL is correct and can be manually downloaded...
+```
+
+How many times is each word used in the test:
+
+```{r}
+physics_words <- physics %>%
+  unnest_tokens(word, text) %>%
+  count(author, word, sort = TRUE) %>%
+  ungroup()
+physics_words
+```
+calculate the tf-idf, then plot the high tf-idf words:
+
+```{r}
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>%
+  mutate(author = factor(author, levels = c("Galileo",
+                                            "Huygens",
+                                            "Tesla")))
+
+plot_physics %>%
+  group_by(author) %>%
+  top_n(15, tf_idf) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~author, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+Note that you can create custom lists of stopwords using the antijoin function. 
+
+```{r}
+mystopwords <- data_frame(word = c("eq","co","rc","ac"))
+
+physics_words <- anti_join(physics_words, mystopwords, by = "word")
+```
+
